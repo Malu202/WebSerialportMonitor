@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Serial Monitor</title>
+    <style>
+        body,
+        html {
+            height: 100%;
+            width: 100%;
+            margin: 0px;
+            padding: 0px;
+        }
+
+        #log {
+            flex: 1 1 auto;
+            display: flex;
+            overflow: hidden;
+            margin-left: 16px;
+        }
+
+        #target {
+            height: 100%;
+            width: 100%;
+            overflow-y: scroll;
+        }
+
+        #ui {
+            flex: 0 0 auto;
+            display: flex;
+            margin: 16px;
+            margin-top: 0px;
+        }
+
+        #layout {
+            height: 100%;
+            width: 100%;
+            max-height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #inputText {
+            flex: 1 1 auto;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="layout">
+        <div id="log">
+            <div id="target"></div>
+        </div>
+        <div id="ui">
+            <button id="connectButton">Connect</button>
+            <select name="baudRate" id="baudRate"></select>
+            <button id="disconnectButton">Disconnect</button>
+            <button id="saveToFile">Save to File</button>
+            <input type="text" name="Send" id="inputText" autofocus>
+            <button id="sendButton">Send</button>
+
+        </div>
+    </div>
+</body>
+
+<script>
+    let disconnect;
+    document.getElementById('connectButton').addEventListener('click', () => {
+        if (navigator.serial) {
+            done = false;
+            disconnect = false;
+            connectSerial();
+        } else {
+            alert('Web Serial API not supported.');
+        }
+    });
+    document.getElementById('disconnectButton').addEventListener('click', () => {
+        disconnect = true;
+    });
+
+    let history = [];
+    let historyIndex = 0;
+    let inputText = document.getElementById('inputText');
+    inputText.addEventListener("keyup", function (event) {
+        if (event.key === "Enter") {
+            sendButton.click();
+        } else if (event.key === "ArrowUp") {
+            if (historyIndex > 0) {
+                console.log('up')
+                historyIndex--;
+                inputText.value = history[historyIndex];
+            }
+        } else if (event.key === "ArrowDown") {
+            if (historyIndex < history.length) {
+                historyIndex++;
+                if (historyIndex == history.length) inputText.value = "";
+                else inputText.value = history[historyIndex];
+            }
+        }
+
+    });
+    document.getElementById('sendButton').addEventListener('click', () => {
+        writeSerial(inputText.value);
+        if (inputText.value != "") {
+            history.push(inputText.value);
+            historyIndex = history.length;
+            inputText.value = "";
+        }
+        console.log("send")
+    });
+
+
+    let encoder;
+    let writer;
+
+    async function connectSerial() {
+        const target = document.getElementById('target');
+        const log = document.getElementById('log');
+
+
+        try {
+            const port = await navigator.serial.requestPort();
+            await port.open({ baudRate: baudRateDropdown.value * 1 });
+
+            const decoder = new TextDecoderStream();
+
+            port.readable.pipeTo(decoder.writable);
+
+            const inputStream = decoder.readable;
+            const reader = inputStream.getReader();
+
+            encoder = new TextEncoder();
+            writer = port.writable.getWriter();
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (value) {
+                    target.innerText += value;
+                    target.scrollTo(0, target.scrollHeight);
+                }
+                if (done || disconnect) {
+                    console.log('[readLoop] DONE', done);
+
+
+
+
+
+                    try {
+                        await reader.cancel();
+                    } catch (e) {
+                        console.log(e);
+                    }
+                    await writer.abort()
+                    //writer.cancel()
+                    reader.releaseLock();
+                    writer.releaseLock();
+                    await port.close();
+
+                    // await port.close()
+                    console.log("closed")
+                    break;
+                }
+            }
+
+        } catch (error) {
+            target.innerHTML = error;
+        }
+    }
+    async function writeSerial(msg) {
+        if (writer && encoder) {
+            await writer.write(encoder.encode(msg));
+            target.innerText += msg + "\n";
+            target.scrollTo(0, target.scrollHeight);
+        }
+    }
+
+    let baudRateDropdown = document.getElementById("baudRate");
+    let possibleBaudRates = [300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 28800, 31250, 38400, 57600, 115200];
+    possibleBaudRates.forEach(baudRateOption => {
+        let newOption = document.createElement("option");
+        newOption.text = baudRateOption;
+        newOption.value = baudRateOption;
+        baudRateDropdown.appendChild(newOption);
+    });
+    baudRateDropdown.value = 9600;
+
+
+    function safeToFile(content, name) {
+        const link = document.createElement("a");
+        const file = new Blob([content], { type: 'text/plain' });
+        link.href = URL.createObjectURL(file);
+        link.download = name;
+        link.click();
+        URL.revokeObjectURL(link.href);
+    };
+    function timestamp(date) {
+        let d = date;
+        if (date == null) d = new Date();
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+    function pad(number) {
+        return String(number).padStart(2, "0");
+    }
+    let saveToFileButton = document.getElementById("saveToFile");
+    saveToFileButton.addEventListener("click", () => {
+        safeToFile(target.innerText, timestamp() + ".txt");
+    })
+</script>
+
+</html>
